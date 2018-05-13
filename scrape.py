@@ -9,6 +9,9 @@ import ez_epub
 import pickle
 from requests.compat import urljoin
 
+import argparse
+import getpass
+
 session = requests.session()
 ILLEAGAL_FILENAME_CHARACTERS = str.maketrans(r'.<>:"/\|?*^', '-----------')
 
@@ -20,13 +23,9 @@ session.headers['content-type'] = "application/x-www-form-urlencoded"
 session.headers['accept-encoding'] = "gzip, deflate, br"
 session.headers['authority'] = "www.blinkist.com"
 
-book_urls = []
-username = "YOUR USERNAME"
-password = "YOUR PASSWORD"
-
 
 def get_csrf_token():
-    url_start = "https://www.blinkist.com/en/books.html"
+    url_start = "https://www.blinkist.com/en/nc/login/"
     response = session.get(url=url_start)
     html_content = response.content.decode("utf-8")
     tree = html.fromstring(html=html_content)
@@ -36,8 +35,7 @@ def get_csrf_token():
 
 def login(username: str, password: str):
     csrf_token = get_csrf_token()
-
-    url_login = "https://www.blinkist.com/en/login/"
+    url_login = "https://www.blinkist.com/en/nc/login/"
     session.post(url=url_login, data={
         "login[email]": username,
         "login[password]": password,
@@ -50,20 +48,20 @@ def login(username: str, password: str):
 def analytic_info_html(book: ez_epub.Book, url):
     response = session.get(url=url)
     tree = html.fromstring(response.content)
-    title = tree.xpath("//div[@class='book__header__name']/text()")[0].strip()
+    title = tree.xpath("//h1[@class='book__header__title']/text()")[0].strip()
     tree_author = [author.strip() for author in tree.xpath("//div[@class='book__header__author']/text()")]
     tree_info__category = "; ".join(tree.xpath("//div[@class='book__header__info__category']//a/text()"))
     tree_image = tree.xpath("//div[@class='book__header__image']/img/@src")[0]
-    tree_synopsis = tree.xpath("//div[@class='book__synopsis__body']")[0]
-    tree_book_faq = tree.xpath("//div[@class='book__faq']")[0]
+    tree_synopsis = tree.xpath("//div[@ref='synopsis']")[0]
+    #tree_book_faq = tree.xpath("//div[@class='book__faq']")[0]
     html_synopsis = html.tostring(tree_synopsis)
     book.impl.description = HTML(html_synopsis, encoding='utf-8')
     book.impl.addMeta('publisher', 'blinkist')
     book.impl.addMeta('tag', tree_info__category)
-    book.impl.addMeta('faq', tree_book_faq)
+    #book.impl.addMeta('faq', tree_book_faq)
 
     section = ez_epub.Section()
-    faq_html = html.tostring(tree_book_faq)
+    faq_html = "<p>No Faq</p>"
     section.html = HTML(faq_html, encoding="utf-8")
     section.title = "Frequently Asked Questions"
     book.sections.append(section)
@@ -79,6 +77,7 @@ def analytic_info_html(book: ez_epub.Book, url):
 
 def analytic_content_html(book: ez_epub.Book, url: str):
     response = session.get(url=url)
+
     tree = html.fromstring(response.content)
     tree_main = tree.xpath("//main[@role='main']")[0]
     tree_main = remove_tag(tree_main, ".//script")
@@ -133,7 +132,7 @@ def extract_book_urls(html_content):
     return local_book_urls
 
 
-def main():
+def main(username, password, book_urls):
     login(username=username, password=password)
 
     for index, book_url in enumerate(book_urls):
@@ -142,14 +141,34 @@ def main():
         book = ez_epub.Book()
         book.sections = []
         book = analytic_info_html(book=book, url="https://www.blinkist.com/en/books/{title}.html".format(title=title))
-        book = analytic_content_html(book=book, url="https://www.blinkist.com/en/reader/{title}/".format(title=title))
+        book = analytic_content_html(book=book, url="https://www.blinkist.com/en/nc/reader/{title}/".format(title=title))
         print('Saving epub')
         book.make('./{title}'.format(title=book.title.translate(ILLEAGAL_FILENAME_CHARACTERS)))
 
 
+
+
+
+
 if __name__ == '__main__':
-    if sys.argv[1:]:
-        book_urls = sys.argv[1:]
-    else:
-        book_urls = sys.stdin
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("username", help="Blinkist username")
+    parser.add_argument("--password", help="Blinkist password")
+    parser.add_argument("urls", help="Comma delimited list of Blinkist book URLs", type=lambda s: [str(item) for item in s.split(',')])
+    #extract args
+    args = parser.parse_args()    
+    # Read username & password
+    username = args.username
+    password = args.password
+    book_urls = args.urls
+
+
+    # No password specified ? get from stdin
+    # if password==None:
+    #     print("Getting password")
+    #     password = input('Password:')
+    #     print("hi")
+
+
+    # Go go go!
+    main(username, password, book_urls)
